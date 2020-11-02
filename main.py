@@ -1,9 +1,10 @@
 import os
-os.system('!source OpenNIDevEnviorment')
-import getcamera
+os.system('source OpenNIDevEnviorment')
+from getcamera import Camera
 
 import cv2
-
+import threading
+import time
 
 Use_coral = True
 if Use_coral:
@@ -24,7 +25,7 @@ model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
 
 
 def Detect_face():
-    frame = getcamera.get_rgb()
+    frame = camera.get_rgb()
     frame = cv2.resize(frame,(240,180),1,1,cv2.INTER_AREA)
     dets, lms = centerface(frame, 180, 240, threshold=0.35)
     for det in dets:
@@ -62,7 +63,20 @@ def Detect_face_coral(img):
         print('No object detected!')
     return img,ans
 
+Color = None
+Depth = None
+Depth_map = None
+def getIMG():
+    global Color,Depth,Depth_map
+    while True:
+        Color = camera.get_rgb()
+        Depth_map,Depth = camera.get_depth()
+
 if __name__ == '__main__':
+    camera = Camera()
+    th1 = threading.Thread(target=getIMG)
+    th1.setDaemon(True)     # 设置为后台线程，这里默认是False，设置为True之后则主线程不用等待子线程
+    th1.start() 
     if Use_coral:
         engine = DetectionEngine(model)
     else:
@@ -70,20 +84,27 @@ if __name__ == '__main__':
     #getcamera.Camera_init()
     while True:
         if Use_coral:
-            frame = getcamera.get_rgb()
-            #frame = cv2.resize(frame,(640,480),1,1,cv2.INTER_AREA)
-            img = Image.fromarray(cv2.cvtColor(frame,cv2.COLOR_BGR2RGB))
-            draw = ImageDraw.Draw(img)
-            image = Detect_face_coral(img)
-            img,ans = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)
-            #dmap,d4d = getcamera.get_depth()
-            #print 'Center pixel is {}mm away'.format(dmap[119,159])
+            if Color is not None and Depth is not None:
+                #frame = camera.get_rgb()
+                #dmap,d4d = camera.get_depth()
+                #frame = cv2.resize(frame,(640,480),1,1,cv2.INTER_AREA)
+                img = Image.fromarray(cv2.cvtColor(Color,cv2.COLOR_BGR2RGB))
+                d4d = Depth
+                draw = ImageDraw.Draw(img)
+                image,ans = Detect_face_coral(img)
+                img = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)
+                #print 'Center pixel is {}mm away'.format(dmap[119,159])
 
-            ## Display the stream syde-by-side
-            #cv2.imshow('depth', d4d)
-            cv2.imshow('result',img)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                ## Display the stream syde-by-side
+                rgbd = np.hstack((img,Depth))
+
+
+                ## Display the stream syde-by-side
+                cv2.imshow('depth || rgb', rgbd)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            else:
+                time.sleep(0.01)
         else:
             ret = Detect_fase()
             if ret is False:
