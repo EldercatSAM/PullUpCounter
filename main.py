@@ -1,12 +1,17 @@
-import os
-os.system('source OpenNIDevEnviorment')
-from getcamera import Camera
-
 import cv2
 import threading
 import time
 
+Use_Axon = False
 Use_coral = True
+
+if Use_Axon:
+    import os
+    os.system('source OpenNIDevEnviorment')
+    from getcamera import Camera
+else:
+    import pyrealsense2 as rs
+
 if Use_coral:
     import argparse
     import platform
@@ -16,13 +21,10 @@ if Use_coral:
     from PIL import Image
     from PIL import ImageDraw
     import numpy as np
+    model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
 else:
-    
     from centerface import CenterFace
     import scipy.io as sio
-
-model = 'mobilenet_ssd_v2_face_quant_postprocess_edgetpu.tflite'
-
 
 def Detect_face():
     frame = camera.get_rgb()
@@ -63,17 +65,42 @@ def Detect_face_coral(img):
         print('No object detected!')
     return img,ans
 
+
+
+
 Color = None
 Depth = None
 Depth_map = None
 def getIMG():
     global Color,Depth,Depth_map
     while True:
-        Color = camera.get_rgb()
-        Depth_map,Depth = camera.get_depth()
+        if Use_Axon:
+            Color = camera.get_rgb()
+            Depth_map,Depth = camera.get_depth()
+        else:
+            frames = pipeline.wait_for_frames()
+            depth_frame = frames.get_depth_frame()
+            color_frame = frames.get_color_frame()
+            if not depth_frame or not color_frame:
+                continue
+            # Convert images to numpy arrays
 
+            Depth = np.asanyarray(depth_frame.get_data())
+
+            Color = np.asanyarray(color_frame.get_data())
+
+            # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
+            #Depth = cv2.applyColorMap(cv2.convertScaleAbs(Depth, alpha=0.03), cv2.COLORMAP_JET)
 if __name__ == '__main__':
-    camera = Camera()
+    if Use_Axon:
+        camera = Camera()
+    else:
+        pipeline = rs.pipeline()
+        config = rs.config()
+        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    # Start streaming
+        pipeline.start(config)
     th1 = threading.Thread(target=getIMG)
     th1.setDaemon(True)     # 设置为后台线程，这里默认是False，设置为True之后则主线程不用等待子线程
     th1.start() 
@@ -89,24 +116,26 @@ if __name__ == '__main__':
                 #dmap,d4d = camera.get_depth()
                 #frame = cv2.resize(frame,(640,480),1,1,cv2.INTER_AREA)
                 img = Image.fromarray(cv2.cvtColor(Color,cv2.COLOR_BGR2RGB))
-                d4d = Depth
+                #d4d = Depth
                 draw = ImageDraw.Draw(img)
                 image,ans = Detect_face_coral(img)
                 img = cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)
                 #print 'Center pixel is {}mm away'.format(dmap[119,159])
+                #Depth = cv2.applyColorMap(cv2.convertScaleAbs(Depth, alpha=0.03), cv2.COLORMAP_JET)
+                #print(img.shape,Depth.shape)
+                ## Display the stream syde-by-side
+                #rgbd = np.hstack((img,Depth))
+                cv2.imshow("depth",Depth)
+                cv2.imshow("rgb",img)
 
                 ## Display the stream syde-by-side
-                rgbd = np.hstack((img,Depth))
-
-
-                ## Display the stream syde-by-side
-                cv2.imshow('depth || rgb', rgbd)
+                #cv2.imshow('depth || rgb', rgbd)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             else:
                 time.sleep(0.01)
         else:
-            ret = Detect_fase()
+            ret = Detect_face()
             if ret is False:
                 break
     getcamera.Camera_stop()
